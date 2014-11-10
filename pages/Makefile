@@ -52,3 +52,7 @@ settings :
 ## clean    : Clean up temporary and intermediate files.
 clean :
 	@rm -rf $$(find .. -name '*~' -print)
+
+## very clean: Remove all built html files
+very-clean:
+	rm $(DST_PAGES)
