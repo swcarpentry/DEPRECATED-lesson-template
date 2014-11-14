@@ -9,8 +9,6 @@ A blockquote will be converted if
 
 1. it begins with a header
 2. that header has attributes
-3. those attributes contain a single class
-4. that class is one of ['objectives', 'callout', 'challenge']
 
 For example, this is a valid blockquote:
 
@@ -31,9 +29,6 @@ like this:
     pandoc source.md --to json | python blockquote2div.py | pandoc --from json
 """
 import pandocfilters as pf
-
-
-valid_classes = ['objectives', 'callout', 'challenge']
 
 
 def find_attributes(blockquote):
@@ -62,8 +57,7 @@ def remove_attributes(blockquote):
 
 def blockquote2div(key, value, format, meta):
     """Convert a blockquote into a div if it begins with a header
-    that has attributes containing a single class that is in the
-    allowed classes.
+    that has attributes containing at least one class.
 
     This function can be passed directly to toJSONFilter
     from pandocfilters.
@@ -73,7 +67,9 @@ def blockquote2div(key, value, format, meta):
         attr = find_attributes(blockquote)
         if not attr:
             return
-        elif len(attr[1]) == 1 and attr[1][0] in valid_classes:
+        elif len(attr[1]) == 0:
+            return
+        else:
             remove_attributes(blockquote)
             # a blockquote is just a list of blocks, so it can be
             # passed directly to Div, which expects Div(attr, blocks)
