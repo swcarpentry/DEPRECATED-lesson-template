@@ -30,6 +30,8 @@ $(DST_DIR)/%.html : $(SRC_DIR)/%.md ../_layouts/page.html
 	pandoc -s -t html \
 	--template=../_layouts/page \
 	--filter=../tools/blockquote2div.py \
+	-V next=$$(find $(SRC_DIR) -name "??-*.md" | grep -1 -A 1 $< | tail -n 1 | grep -v $< | sed 's/\.md/\.html/') \
+	-V previous=$$(find $(SRC_DIR) -name "??-*.md" | grep -1 -B 1 $< | head -n 1 | grep -v $< | sed 's/\.md/\.html/') \
 	$(INCLUDES) \
 	-o $@ $<
 

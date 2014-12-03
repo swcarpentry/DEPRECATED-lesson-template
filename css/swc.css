@@ -105,6 +105,10 @@ pre.error {
     color: Red;
 }
 
+.lesson-nav {
+  text-align: center;
+}
+
 /* Printing */
 @media print {
   h1 {
@@ -137,6 +141,10 @@ pre.error {
   }
 
   .footer {
+    display: none;
+  }
+
+  .lesson-nav {
     display: none;
   }
 }
