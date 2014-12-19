@@ -337,12 +337,6 @@ class IndexPageValidator(MarkdownValidator):
                     self.filename))
         return intro_section and prereqs_tests
 
-    def _validate_links(self, links_to_skip=('motivation.html',
-                                             'reference.html',
-                                             'discussion.html',
-                                             'instructors.html')):
-        return super(IndexPageValidator, self)._validate_links(links_to_skip)
-
     def _run_tests(self):
         tests = [self._validate_intro_section()]
         parent_tests = super(IndexPageValidator, self)._run_tests()
@@ -406,7 +400,8 @@ class TopicPageValidator(MarkdownValidator):
 class MotivationPageValidator(MarkdownValidator):
     """Validate motivation.md"""
     DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str}
+                   "title": vh.is_str,
+                   "subtitle": vh.is_str}
     # TODO: How to validate? May be a mix of reveal.js (HTML) + markdown.
 
 

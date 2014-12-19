@@ -1,6 +1,7 @@
 ---
 layout: slides
 title: Why Topic?
+subtitle: Motivation
 ---
 <section class="slide">
 ## Why Topic?
