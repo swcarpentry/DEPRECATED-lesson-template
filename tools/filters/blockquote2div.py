@@ -105,12 +105,12 @@ def blockquote2div(key, value, format, meta):
         id, classes, kvs = attr
 
         ltitle = pf.stringify(inlines).lower()
+        remove_attributes(blockquote)
         if ltitle in SPECIAL_TITLES:
             classes.append(SPECIAL_TITLES[ltitle])
             return pf.Div(attr, blockquote)
 
         elif len(classes) == 1 and classes[0] in SPECIAL_CLASSES:
-            remove_attributes(blockquote)
             # a blockquote is just a list of blocks, so it can be
             # passed directly to Div, which expects Div(attr, blocks)
             return pf.Div(attr, blockquote)
