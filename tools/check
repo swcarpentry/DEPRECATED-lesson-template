@@ -201,33 +201,22 @@ class MarkdownValidator(object):
         return (len(missing_headings) == 0) and \
                valid_order and no_extra and correct_level
 
-    def _validate_one_link(self, link_node):
-        """Logic to validate a single external asset (image or link)
-
-        Any local html file being linked was generated as part of the lesson.
-        Therefore, file links (.html) must have a Markdown file
-            in the expected folder.
-
-        The title of the linked Markdown document should match the link text.
-
-        For other assets (links or images), just verify that a file exists
+    def _validate_interlink(self, dest, link_text, check_text=False):
+        """Validate interlink.
         """
-        dest, link_text = self.ast.get_link_info(link_node)
+        fn = dest.split("#")[0]  # Split anchor name from filename
+        expected_md_fn = os.path.splitext(fn)[0] + os.extsep + "md"
+        expected_md_path = os.path.join(self.markdown_dir,
+                                        expected_md_fn)
+        if not os.path.isfile(expected_md_path):
+            logging.error(
+                "In {0}: "
+                "The document links to {1}, but could not find "
+                "the expected markdown file {2}".format(
+                    self.filename, dest, expected_md_path))
+            return False
 
-        if re.match(r"^[\w,\s-]+\.(html?)", dest, re.IGNORECASE):
-            # HTML files in same folder are made from Markdown; special tests
-            fn = dest.split("#")[0]  # Split anchor name from filename
-            expected_md_fn = os.path.splitext(fn)[0] + os.extsep + "md"
-            expected_md_path = os.path.join(self.markdown_dir,
-                                            expected_md_fn)
-            if not os.path.isfile(expected_md_path):
-                logging.error(
-                    "In {0}: "
-                    "The document links to {1}, but could not find "
-                    "the expected markdown file {2}".format(
-                        self.filename, dest, expected_md_path))
-                return False
-
+        if check_text:
             # If file exists, parse and validate link text = node title
             with open(expected_md_path, 'rU') as link_dest_file:
                 dest_contents = link_dest_file.read()
@@ -245,6 +234,22 @@ class MarkdownValidator(object):
                         self.filename, dest,
                         link_text, dest_page_title))
                 return False
+
+    def _validate_one_link(self, link_node):
+        """Logic to validate a single external asset (image or link)
+
+        Any local html file being linked was generated as part of the lesson.
+        Therefore, file links (.html) must have a Markdown file
+            in the expected folder.
+
+        The title of the linked Markdown document should match the link text.
+
+        For other assets (links or images), just verify that a file exists
+        """
+        dest, link_text = self.ast.get_link_info(link_node)
+
+        if re.match(r"^[\w,\s-]+\.(html?)", dest, re.IGNORECASE):
+            return self._validate_interlink(dest, link_text)
         elif not re.match(r"^((https?|ftp)://)", dest, re.IGNORECASE)\
                 and not re.match(r"^#.*", dest):
             # If not web URL, and not anchor on same page, then
@@ -337,11 +342,10 @@ class IndexPageValidator(MarkdownValidator):
                     self.filename))
         return intro_section and prereqs_tests
 
-    def _validate_links(self, links_to_skip=('motivation.html',
-                                             'reference.html',
-                                             'discussion.html',
-                                             'instructors.html')):
-        return super(IndexPageValidator, self)._validate_links(links_to_skip)
+    def _validate_interlink(self, dest, link_text, check_text=True):
+        return super()._validate_interlink(dest,
+                                           link_text,
+                                           check_text=check_text)
 
     def _run_tests(self):
         tests = [self._validate_intro_section()]
@@ -455,6 +459,11 @@ class ReferencePageValidator(MarkdownValidator):
                                 self.filename))
                     entry_is_valid = False
         return entry_is_valid
+
+    def _validate_interlink(self, dest, link_text, check_text=True):
+        return super()._validate_interlink(dest,
+                                           link_text,
+                                           check_text=check_text)
 
     def _validate_glossary(self):
         """Validate the glossary section.
