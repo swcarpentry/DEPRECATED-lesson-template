@@ -1,3 +1,7 @@
+# Auto Configuration
+GH_SITE = $$(git remote -v | grep -P 'origin.*\(push\)' | perl -pe 's,origin\s*(?:git@|https://|git://)github.com[:/]([\w-]*)/([\w-]*)\s*\(push\),https://github.com/\1/\2,')
+AUTHOR_EMAIL = $$(git config user.email)
+
 # Files.
 MARKDOWN = $(wildcard *.md)
 EXCLUDES = README.md LAYOUT.md FAQ.md DESIGN.md
@@ -11,7 +15,7 @@ FILTERS = $(wildcard tools/filters/*.py)
 INCLUDES = \
 	-Vheader="$$(cat _includes/header.html)" \
 	-Vbanner="$$(cat _includes/banner.html)" \
-	-Vfooter="$$(cat _includes/footer.html)" \
+	-Vfooter="$$(echo '' | pandoc --template _includes/footer.html -Vemail=$(AUTHOR_EMAIL) -Vsite=$(GH_SITE))" \
 	-Vjavascript="$$(cat _includes/javascript.html)"
 
 # Default action is to show what commands are available.
