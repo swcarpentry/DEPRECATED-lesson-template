@@ -6,7 +6,7 @@ DST_PAGES = $(patsubst %.md,%.html,$(SRC_PAGES))
 INCLUDES = \
 	-Vheader="$$(cat _includes/header.html)" \
 	-Vbanner="$$(cat _includes/banner.html)" \
-	-Vfooter="$$(cat _includes/footer.html)" \
+	-Vfooter="$$(pandoc config.yaml --template _includes/footer.html)" \
 	-Vjavascript="$$(cat _includes/javascript.html)"
 
 # Default action is to show what commands are available.
