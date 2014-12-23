@@ -1,12 +1,18 @@
+SHELL := /bin/bash
+
 # Files.
 SRC_PAGES = $(wildcard *.md)
 DST_PAGES = $(patsubst %.md,%.html,$(SRC_PAGES))
+
+# Configuration file (insert --- at start and end
+# to make it look like a pandoc metadata block)
+GET_CONFIG = sed -e '1s/^/---\n/' -e '$$s/$$/\n---/' config.yaml
 
 # Inclusions.
 INCLUDES = \
 	-Vheader="$$(cat _includes/header.html)" \
 	-Vbanner="$$(cat _includes/banner.html)" \
-	-Vfooter="$$(pandoc config.yaml --template _includes/footer.html)" \
+	-Vfooter="$$(pandoc <($(GET_CONFIG)) --template _includes/footer.html)" \
 	-Vjavascript="$$(cat _includes/javascript.html)"
 
 # Default action is to show what commands are available.
