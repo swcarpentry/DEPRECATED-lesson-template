@@ -150,7 +150,7 @@ class MarkdownValidator(object):
             ast_node = self.ast.data
             headings = self.HEADINGS
 
-        heading_nodes = self.ast.get_section_headings(ast_node)
+        heading_nodes = self.ast.get_headings(ast_node)
         # All headings should be exactly level 2
         correct_level = True
         for n in heading_nodes:
@@ -379,7 +379,7 @@ class TopicPageValidator(MarkdownValidator):
 
         The top-level document has no headings indicating subtopics.
         The only valid subheadings are nested in blockquote elements"""
-        heading_nodes = self.ast.get_section_headings()
+        heading_nodes = self.ast.get_headings()
         if len(heading_nodes) == 0:
             return True
 
