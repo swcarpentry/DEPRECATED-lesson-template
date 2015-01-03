@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 
+import inspect
 import json
 import logging
 import re
@@ -49,6 +50,28 @@ def get_css_class(s):
     Returns empty list when """
     return re.findall("\{\.(.*?)\}", s)
 
+
+### Loop over AST
+def transverse_ast(ast, is_of_type):
+    """Transverse AST getting nodes of desire type.
+
+    **Note**: is_of_type is a function or a method.
+    """
+    if (not inspect.isfunction(is_of_type) and not inspect.ismethod(is_of_type)):
+        raise TypeError("is_of_type must be a function or a method")
+
+    l = []
+    if len(ast.children) == 0 and is_of_type(ast):
+        return ast
+    else:
+        for n in ast.children:
+            sub_ast = transverse_ast(n, is_of_type)
+            if type(sub_ast) is list:
+                l.extend(sub_ast)
+            elif sub_ast is not None:
+                l.append(sub_ast)
+
+    return l
 
 ### Helper objects
 class CommonMarkHelper(object):
@@ -102,11 +125,11 @@ class CommonMarkHelper(object):
                     heading_level=heading_level,
                     show_msg=False)]
 
-    def get_section_headings(self, ast_node=None):
+    def get_headings(self, ast_node=None):
         """Returns a list of ast nodes that are headings"""
         if ast_node is None:
             ast_node = self.data
-        return [n for n in ast_node.children if self.is_heading(n)]
+        return transverse_ast(ast_node, self.is_heading)
 
     def get_link_info(self, link_node):
         """Given a link node, return the link title and destination"""
@@ -146,7 +169,7 @@ class CommonMarkHelper(object):
         if ast_node is None:
             ast_node = self.data
 
-        num_nodes = len([n for n in self.get_section_headings(ast_node)
+        num_nodes = len([n for n in self.get_headings(ast_node)
                          if (strip_attrs(n.strings[0]) == section_title)
                          and (n.level == heading_level)])
 
