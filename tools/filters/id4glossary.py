@@ -7,17 +7,12 @@ Usage:
 """
 import pandocfilters as pf
 
-def normalize_keyword(keyword):
-    """Normalize keyword for became id
-
-    - Replace white space with '-'
-    - Convert to lowercase"""
-    return keyword.lower().replace(' ', '-')
+import common
 
 def keyword2html(keyword_node):
     """Return HTML version of keyword with id."""
     keyword = pf.stringify(keyword_node)
-    id = normalize_keyword(keyword)
+    id = common.text2fragment_identifier(keyword)
     return [{"t": "Span",
              "c": [[id, [],[]],
                  keyword_node]}]
