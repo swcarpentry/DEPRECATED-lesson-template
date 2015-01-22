@@ -10,37 +10,39 @@ Contains validators for several kinds of template.
 
 Call at command line with flag -h to see options and usage instructions.
 """
+from __future__ import print_function
 
 import argparse
-import collections
 import glob
 import hashlib
+import itertools
 import logging
 import os
 import re
 import sys
 
-import CommonMark
-import yaml
+import json
+import pypandoc
+import pandocfilters
 
 import validation_helpers as vh
-
+import filters.common as fc
 
 class MarkdownValidator(object):
     """Base class for Markdown validation
 
     Contains basic validation skeleton to be extended for specific page types
     """
-    HEADINGS = []  # List of strings containing expected heading text
+    EXPECTED_HEADINGS = []  # List of strings containing expected heading text
 
     # Callout boxes (blockquote items) have special rules.
     # Dict of tuples for each callout type: {style: (title, min, max)}
-    CALLOUTS = {}
+    EXPECTED_BOXES = {}
 
     WARN_ON_EXTRA_HEADINGS = True  # Warn when other headings are present?
 
-    # Validate YAML doc headers: dict of {header text: validation_func}
-    DOC_HEADERS = {}
+    # Validate YAML doc header: dict of {header text: validation_func}
+    EXPECTED_YAML_HEADER = {}
 
     def __init__(self, filename=None, markdown=None):
         """Perform validation on a Markdown document.
@@ -63,16 +65,7 @@ class MarkdownValidator(object):
             self.markdown_dir = self.lesson_dir
             self.markdown = markdown
 
-        ast = self._parse_markdown(self.markdown)
-        self.ast = vh.CommonMarkHelper(ast)
-
-        # Keep track of how many times callout box styles are used
-        self._callout_counts = collections.Counter()
-
-    def _parse_markdown(self, markdown):
-        parser = CommonMark.DocParser()
-        ast = parser.parse(markdown)
-        return ast
+        self.ast = vh.PandocAstHelper(self.markdown)
 
     def _validate_no_fixme(self):
         """Validate that the file contains no lines marked 'FIXME'
@@ -87,343 +80,402 @@ class MarkdownValidator(object):
                 valid = False
         return valid
 
-    def _validate_hrs(self):
-        """Validate header
-
-        Verify that the header section at top of document
-        is bracketed by two horizontal rules"""
-        valid = True
-        try:
-            hr_nodes = [self.ast.children[0], self.ast.children[2]]
-        except IndexError:
-            logging.error(
-                "In {0}: "
-                "Document must include header sections".format(self.filename))
-            return False
-
-        for hr in hr_nodes:
-            if not self.ast.is_hr(hr):
-                logging.error(
-                    "In {0}: "
-                    "Expected --- at line: {1}".format(
-                        self.filename, hr.start_line))
-                valid = False
-        return valid
-
-    def _validate_one_doc_header_row(self, label, content):
+    def _validate_one_element_from_header(self, key):
         """Validate a single row of the document header section"""
-        if label not in self.DOC_HEADERS:
-            logging.warning(
-                "In {0}: "
-                "Unrecognized label in header section: {1}".format(
-                    self.filename, label))
-            return False
+        res = True
 
-        validation_function = self.DOC_HEADERS[label]
-        validate_header = validation_function(content)
-        if not validate_header:
+        if key not in self.EXPECTED_YAML_HEADER:
+            logging.warning(
+                "In {0} YAML header: "
+                "Unrecognized label '{1}'".format(
+                    self.filename, key))
+            res = False
+        else:
+            # FIXME: This depends on
+            # https://github.com/jgm/pandocfilters/pull/14
+            node = [self.ast.header[key]]
+            if not self.EXPECTED_YAML_HEADER[key](vh.ast_to_string(node)):
+                logging.error(
+                    "In {0} YAML header: "
+                    "label '{1}' "
+                    "does not follow expected format".format(self.filename, key))
+                res = False
+
+        return res
+
+    def _validate_header(self):
+        """Validate YAML header."""
+        res = True
+
+        if len(self.ast.header) == 0:
             logging.error(
                 "In {0}: "
-                "Contents of document header field for label {1} "
-                "do not follow expected format".format(self.filename, label))
-        return validate_header
+                "Document must include YAML header".format(self.filename))
+            res = False
+        else:
+            # Check if YAML keys and values are valide
+            for key in self.ast.header:
+                res = res and self._validate_one_element_from_header(key)
 
-    # Methods related to specific validation. Can override specific tests.
-    def _validate_doc_headers(self):
-        """Validate the document header section.
+            # Must have all expected header lines, and no others.
+            for expected, occurred in itertools.zip_longest(
+                    sorted(self.EXPECTED_YAML_HEADER),
+                    sorted(self.ast.header)):
+                if expected is None:
+                    logging.error(
+                        "In {0}: "
+                        "Extra key {1} in YAML header".format(self.filename,
+                            occurred))
+                    res = False
+                elif occurred is None:
+                    logging.error(
+                        "In {0}: "
+                        "Missing key {1} in YAML header".format(self.filename,
+                            expected))
+                    res = False
+                elif expected != occurred:
+                    logging.error(
+                        "In {0}: "
+                        "Key {1} in YAML header should be {2}".format(self.filename,
+                            occurred, expected))
+                    res = False
 
-        Pass only if the header of the document contains the specified
-            sections with the expected contents"""
+        return res
 
-        # Test: Header section should be wrapped in hrs
-        has_hrs = self._validate_hrs()
+    # TODO Split this function by creating _validade_one_heading.
+    def _validate_one_heading(self, heading):
+        """Validade one heading."""
+        res = True
 
-        header_node = self.ast.children[1]
-        header_text = '\n'.join(header_node.strings)
+        level, title = heading
 
-        # Parse headers as YAML. Don't check if parser returns None or str.
-        header_yaml = yaml.load(header_text)
-        if not isinstance(header_yaml, dict):
-            logging.error("In {0}: "
-                          "Expected YAML markup with labels "
-                          "{1}".format(self.filename, self.DOC_HEADERS.keys()))
-            return False
+        # Headings should be exactly level 2
+        if level != 2:
+            logging.error(
+                "In {0}: "
+                "Heading '{1}' should be level 2".format(
+                    self.filename, title))
+            res = False
 
-        # Test: Labeled YAML should match expected format
-        test_headers = [self._validate_one_doc_header_row(k, v)
-                        for k, v in header_yaml.items()]
+        return res
 
-        # Test: Must have all expected header lines, and no others.
-        only_headers = (len(header_yaml) == len(self.DOC_HEADERS))
+    def _validate_headings_order(self):
+        res = True
 
-        # If expected headings are missing, print an informative message
-        missing_headings = [h for h in self.DOC_HEADERS
-                            if h not in header_yaml]
+        headings = [title for level, title in self.ast.get_headings() if level == 2]
 
-        for h in missing_headings:
-            logging.error("In {0}: "
-                          "Header section is missing expected "
-                          "row '{1}'".format(self.filename, h))
-
-        return has_hrs and all(test_headers) and only_headers
-
-    def _validate_section_heading_order(self, ast_node=None, headings=None):
-        """Verify that section headings appear, and in the order expected"""
-        if ast_node is None:
-            ast_node = self.ast.data
-            headings = self.HEADINGS
-
-        heading_nodes = self.ast.get_section_headings(ast_node)
-        # All headings should be exactly level 2
-        correct_level = True
-        for n in heading_nodes:
-            if n.level != 2:
+        for expected, occurred in itertools.zip_longest(self.EXPECTED_HEADINGS,
+                headings):
+            if expected is None:
                 logging.error(
                     "In {0}: "
-                    "Heading at line {1} should be level 2".format(
-                        self.filename, n.start_line))
-                correct_level = False
+                    "Extra heading {1}".format(self.filename,
+                        occurred))
+                res = False
+            elif occurred is None:
+                logging.error(
+                    "In {0}: "
+                    "Missing heading {1}".format(self.filename,
+                        expected))
+                res = False
+            elif expected != occurred:
+                logging.error(
+                    "In {0}: "
+                    "Heading {1} should be {2}".format(self.filename,
+                        occurred, expected))
+                res = False
 
-        heading_labels = [vh.strip_attrs(n.strings[0]) for n in heading_nodes]
+        return res
 
-        # Check for missing and extra headings
-        missing_headings = [expected_heading for expected_heading in headings
-                            if expected_heading not in heading_labels]
+    def _validate_headings(self):
+        """Validate headings present at the document.
 
-        extra_headings = [found_heading for found_heading in heading_labels
-                          if found_heading not in headings]
+        Pass only if the headings in the document contains the specified
+        ones with the expected contents."""
+        res = True
+        headings = self.ast.get_headings()
 
-        for h in missing_headings:
+        for heading in headings:
+            res = res and self._validate_one_heading(heading)
+
+        heading_titles = [title for (level, title) in headings]
+
+        # Check for missing heading
+        missing_headings = [expected_heading for expected_heading in self.EXPECTED_HEADINGS
+                if expected_heading not in heading_titles]
+        for heading in missing_headings:
             logging.error(
                 "In {0}: "
                 "Document is missing expected heading: {1}".format(
-                    self.filename, h))
+                    self.filename, heading))
+            res = False
 
-        if self.WARN_ON_EXTRA_HEADINGS is True:
-            for h in extra_headings:
+        # Check for extra headings
+        if self.WARN_ON_EXTRA_HEADINGS:
+            extra_headings = [found_heading for found_heading in heading_titles
+                    if found_heading not in self.EXPECTED_HEADINGS]
+            for heading in extra_headings:
                 logging.error(
                     "In {0}: "
                     "Document contains heading "
                     "not specified in the template: {1}".format(
-                        self.filename, h))
-            no_extra = (len(extra_headings) == 0)
-        else:
-            no_extra = True
+                        self.filename, heading))
+                res = False
 
-        # Check that the subset of headings
-        # in the template spec matches order in the document
-        valid_order = True
-        headings_overlap = [h for h in heading_labels if h in headings]
-        if len(missing_headings) == 0 and headings_overlap != headings:
-            valid_order = False
-            logging.error(
-                "In {0}: "
-                "Document headings do not match "
-                "the order specified by the template".format(self.filename))
+            # TODO Check that the subset of headings
+            # in the template spec matches order in the document
+            res = res and self._validate_headings_order()
 
-        return (len(missing_headings) == 0) and \
-            valid_order and no_extra and correct_level
-
-    def _validate_one_callout(self, callout_node):
-        """
-        Logic to validate a single callout box (defined as a blockquoted
-        section that starts with a heading). Checks that:
-
-        * First child of callout box should be a lvl 2 header with
-          known title & CSS style
-        * Callout box must have at least one child after the heading
-
-        An additional test is done in another function:
-        * Checks # times callout style appears in document, minc <= n <= maxc
-        """
-        heading_node = callout_node.children[0]
-        valid_head_lvl = self.ast.is_heading(heading_node, heading_level=2)
-        title, styles = self.ast.get_heading_info(heading_node)
-
-        if not valid_head_lvl:
-            logging.error("In {0}: "
-                          "Callout box titled '{1}' must start with a "
-                          "level 2 heading".format(self.filename, title))
-
-        try:
-            style = styles[0]
-        except IndexError:
-            logging.error(
-                "In {0}: "
-                "Callout section titled '{1}' must specify "
-                "a CSS style".format(self.filename, title))
-            return False
-
-        # Track # times this style is used in any callout
-        self._callout_counts[style] += 1
-
-        # Verify style actually in callout spec
-        if style not in self.CALLOUTS:
-            spec_title = None
-            valid_style = False
-        else:
-            spec_title, _, _ = self.CALLOUTS[style]
-            valid_style = True
-
-        has_children = self.ast.has_number_children(callout_node, minc=2)
-        if spec_title is not None and title != spec_title:
-            # Callout box must have specified heading title
-            logging.error(
-                "In {0}: "
-                "Callout section with style '{1}' should have "
-                "title '{2}'".format(self.filename, style, spec_title))
-            valid_title = False
-        else:
-            valid_title = True
-
-        res = (valid_style and valid_title and has_children and valid_head_lvl)
         return res
 
-    def _validate_callouts(self):
-        """
-        Validate all sections that appear as callouts
-
-        The style is a better determinant of callout than the title
-        """
-        callout_nodes = self.ast.get_callouts()
-        callouts_valid = True
-
-        # Validate all the callout nodes present
-        for n in callout_nodes:
-            res = self._validate_one_callout(n)
-            callouts_valid = callouts_valid and res
-
-        found_styles = self._callout_counts
-
-        # Issue error if style is not present correct # times
-        missing_styles = [style
-                          for style, (title, minc, maxc) in self.CALLOUTS.items()
-                          if not ((minc or 0) <= found_styles[style]
-                                  <= (maxc or sys.maxsize))]
-        unknown_styles = [k for k in found_styles if k not in self.CALLOUTS]
-
-        for style in unknown_styles:
-            logging.error("In {0}: "
-                          "Found callout box with unrecognized "
-                          "style '{1}'".format(self.filename, style))
-
-        for style in missing_styles:
-            minc = self.CALLOUTS[style][1]
-            maxc = self.CALLOUTS[style][2]
-            logging.error("In {0}: "
-                          "Expected between min {1} and max {2} callout boxes "
-                          "with style '{3}'".format(
-                self.filename, minc, maxc, style))
-
-        return (callouts_valid and
-                len(missing_styles) == 0 and len(unknown_styles) == 0)
-
-    # Link validation methods
-    def _validate_one_html_link(self, link_node, check_text=False):
-        """
-        Any local html file being linked was generated as part of the lesson.
-        Therefore, file links (.html) must have a Markdown file
-            in the expected folder.
-
-        The title of the linked Markdown document should match the link text.
-        """
-        dest, link_text = self.ast.get_link_info(link_node)
-
-        # HTML files in same folder are made from Markdown; special tests
-        fn = dest.split("#")[0]  # Split anchor name from filename
-        expected_md_fn = os.path.splitext(fn)[0] + os.extsep + "md"
-        expected_md_path = os.path.join(self.markdown_dir,
-                                        expected_md_fn)
-        if not os.path.isfile(expected_md_path):
+    def _is_box_nonempty(self, ast_node):
+        """Logic to check if box is empty."""
+        if len(ast_node['c']) == 1:
             logging.error(
                 "In {0}: "
-                "The document links to {1}, but could not find "
-                "the expected markdown file {2}".format(
-                    self.filename, fn, expected_md_path))
+                "Box '{1}' should not be empty.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
             return False
-
-        if check_text is True:
-            # If file exists, parse and validate link text = node title
-            with open(expected_md_path, 'rU') as link_dest_file:
-                dest_contents = link_dest_file.read()
-
-            dest_ast = self._parse_markdown(dest_contents)
-            dest_ast = vh.CommonMarkHelper(dest_ast)
-            dest_page_title = dest_ast.get_doc_header_subtitle()
-
-            if dest_page_title != link_text:
-                logging.error(
-                    "In {0}: "
-                    "The linked page {1} exists, but "
-                    "the link text '{2}' does not match the "
-                    "(sub)title of that page, '{3}'.".format(
-                        self.filename, dest,
-                        link_text, dest_page_title))
-                return False
-        return True
-
-    def _validate_one_link(self, link_node, check_text=False):
-        """Logic to validate a single link to a file asset
-
-        Performs special checks for links to a local markdown file.
-
-        For links or images, just verify that a file exists.
-        """
-        dest, link_text = self.ast.get_link_info(link_node)
-
-        if re.match(r"^[\w,\s-]+\.(html?)", dest, re.IGNORECASE):
-            # Validate local html links have matching md file
-            return self._validate_one_html_link(link_node,
-                                                check_text=check_text)
-        elif not re.match(r"^((https?|ftp)://.+)|mailto:",
-                          dest, re.IGNORECASE)\
-                and not re.match(r"^#.*", dest):
-            # If not web or email URL, and not anchor on same page, then
-            #  verify that local file exists
-            dest_path = os.path.join(self.lesson_dir, dest)
-            dest_path = dest_path.split("#")[0]  # Split anchor from filename
-            if not os.path.isfile(dest_path):
-                fn = dest.split("#")[0]  # Split anchor name from filename
-                logging.error(
-                    "In {0}: "
-                    "Could not find the linked asset file "
-                    "{1} in {2}. If this is a URL, it must be "
-                    "prefixed with http(s):// or ftp://.".format(
-                        self.filename, fn, dest_path))
-                return False
         else:
-            logging.debug(
+            return True
+
+    def _is_callout_box(self, ast_node):
+        """Logic to validate a single callout box
+        (defined as a blockquoted section
+        that starts with a heading). Check that:
+
+        *   First child of box should a level 2 heading
+            with CSS style
+        *   Box must at least a second element
+        """
+        res = True
+
+        res = res and self._is_box_nonempty(ast_node)
+
+        return res
+
+    def _is_challenge_box(self, ast_node):
+        """Logic to validate a single challenge box
+        (defined as a blockquoted section
+        that starts with a heading). Check that:
+
+        *   First child of box should a level 2 heading
+            with CSS style
+        *   Box must at least a second element
+        """
+        res = True
+
+        res = res and self._is_box_nonempty(ast_node)
+
+        return res
+
+    def _is_objectives_box(self, ast_node):
+        """Logic to validate a single objective box
+        (defined as a blockquoted section
+        that starts with a heading). Check that:
+
+        *   First child of box should a level 2 heading
+            with CSS style
+        *   Box must have only one paragraph.
+        """
+        res = True
+
+        res = res and self._is_box_nonempty(ast_node)
+
+        if ast_node['c'][1]['t'] != "BulletList":
+            logging.error(
                 "In {0}: "
-                "Skipped validation of link {1}".format(self.filename, dest))
+                "Box '{1}' should has a list as second element.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
+            res = False
+
+        if len(ast_node['c']) > 2:
+            logging.error(
+                "In {0}: "
+                "Box '{1}' should has only one heading and one list.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
+            res = False
+
+        return res
+
+    def _is_prereq_box(self, ast_node):
+        """Logic to validate a single prereq box
+        (defined as a blockquoted section
+        that starts with a heading). Check that:
+
+        *   First child of box should a level 2 heading
+            with CSS style
+        *   Box must at least a second element
+        """
+        res = True
+
+        # TODO This need improvements to support internationalization
+        if vh.ast_to_string(ast_node['c'][0]) != "Prerequisites":
+            logging.error(
+                "In {0}: "
+                "Title of box '{1}' should be Prerequisites.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
+            res = False
+
+        res = res and self._is_box_nonempty(ast_node)
+
+        if ast_node['c'][1]['t'] != "Para":
+            logging.error(
+                "In {0}: "
+                "Box '{1}' should has a paragraph as second element.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
+            res = False
+
+        if len(ast_node['c']) > 2:
+            logging.error(
+                "In {0}: "
+                "Box '{1}' should has only one heading and one list.".format(
+                    self.filename,
+                    vh.ast_to_string(ast_node['c'][0])))
+            res = False
+
+        return res
+
+    def _validate_boxes(self):
+        """Validate boxes present at the document.
+
+        Pass only if the headings in the document contains the specified
+        ones with the expected contents."""
+
+        res = True
+        boxes_type_and_functions = [('callout', self._is_callout_box),
+                                    ('challenge', self._is_callout_box),
+                                    ('objectives', self._is_objectives_box),
+                                    ('prereq', self._is_prereq_box)]
+
+        boxes = self.ast.get_boxes()
+        boxes_counters = {}
+
+        for box in boxes:
+            if vh.get_box_level(box) != 2:
+                logging.error(
+                    "In {0}: "
+                    "The title of box {1} must be of level 2.".format(
+                        self.filename,
+                        vh.get_box_title(box)))
+                res = res and False
+
+            box_type = vh.get_box_type(box)
+            if box_type not in boxes_counters:
+                boxes_counters[box_type] = 0
+
+            box_is_know = False
+            for box_type_, box_function_ in boxes_type_and_functions:
+                if box_type == box_type_:
+                    box_is_know = True
+                    if box_function_(box):
+                        boxes_counters[box_type] += 1
+                    else:
+                        res = False
+            if not box_is_know:
+                logging.error(
+                    "In {0}: "
+                    "Box {1} of unknown type.".format(
+                        self.filename,
+                        vh.get_box_title(box)))
+                res = res and False
+
+        for expected_box_type in self.EXPECTED_BOXES:
+            _, min_, max_ = self.EXPECTED_BOXES[expected_box_type]
+
+            if expected_box_type not in boxes_counters:
+                if min_ > 0:
+                    logging.error(
+                        "In {0}: "
+                        "Missing box {1}.".format(
+                            self.filename,
+                            expected_box_type))
+                    res = False
+            elif (min_ > boxes_counters[expected_box_type]
+                    or max_ < boxes_counters[expected_box_type]):
+                logging.error(
+                    "In {0}: "
+                    "Should be at least {1} "
+                    "and no more than {2} box {3}.".format(
+                        self.filename, min_, max_,
+                        expected_box_type))
+                res = False
+
+        return res
+
+    def _validate_one_anchor(self, file_path, anchor):
+        """Validate a single anchor."""
+        dest = MarkdownValidator(file_path)
+        return anchor in dest.ast.anchors
+
+    def _validate_one_link(self, address, link_text):
+        """Validate a single link."""
+        # Not need to validate links to third party sites.
+        if (not re.match(r"^((https?|ftp)://)", address, re.IGNORECASE)
+                and not re.match(r"^mailto:", address)):
+            dest = address.split("#")
+            if len(dest) > 1:
+                anchor = dest[1]
+            else:
+                anchor = None
+            dest = dest[0] or self.filename
+            dest_path = os.path.join(self.lesson_dir, dest)
+
+            # If HTML file need to check for Markdown file.
+            if re.search(r"\.(html?)$", dest_path, re.IGNORECASE):
+                dest_path = dest_path.replace(".html", ".md")
+
+                if not os.path.isfile(dest_path):
+                    logging.error(
+                        "In {0}: "
+                        "The document links to {1}, but could not find "
+                        "the expected Markdown file {2}".format(
+                            self.filename, address, dest_path))
+                    return False
+                elif anchor:
+                    if not anchor in MarkdownValidator(dest_path).ast.anchors:
+                        logging.error(
+                            "In {0}: "
+                            "The document links to {1}, but could not find "
+                            "the anchor {2} in {3}".format(
+                                self.filename, address, anchor, dest_path))
+                        return False
+            else:
+                if not os.path.isfile(dest_path):
+                    logging.error(
+                        "In {0}: "
+                        "Could not find the linked asset file "
+                        "{1}. If this is a URL, it must be "
+                        "prefixed with http(s):// or ftp://.".format(
+                            self.filename, dest_path))
+                    return False
+
         return True
-
-    def _partition_links(self):
-        """Fetch links in document. If this template has special requirements
-        for link text (eg only some links' text should match dest page title),
-        filter the list accordingly.
-
-        Default behavior: don't check the text of any links"""
-        check_text = []
-        no_check_text = self.ast.find_external_links()
-
-        return check_text, no_check_text
 
     def _validate_links(self):
-        """Validate all references to external content
+        """Validate links.
 
-        This includes links AND images: these are the two types of node that
-        CommonMark assigns a .destination property"""
-        check_text, no_check_text = self._partition_links()
+        Verify that all the links in the document are valid."""
+        res = True
+        links = []  # List of ('text', 'address')
 
-        valid = True
-        for link_node in check_text:
-            res = self._validate_one_link(link_node, check_text=True)
-            valid = valid and res
+        def get_links(key, val, format, meta):
+            if key in ("Link", "Image"):
+                links.append(
+                    (vh.ast_to_string(val[0]),
+                     val[1][0]))
 
-        for link_node in no_check_text:
-            res = self._validate_one_link(link_node, check_text=False)
-            valid = valid and res
-        return valid
+        pandocfilters.walk(self.ast.body, get_links, "", {})
+
+        for link in links:
+            res = res and self._validate_one_link(link[1], link[0])
+
+        return res
 
     def _run_tests(self):
         """
@@ -432,9 +484,9 @@ class MarkdownValidator(object):
         Error trapping is handled by the validate() wrapper method.
         """
         tests = [self._validate_no_fixme(),
-                 self._validate_doc_headers(),
-                 self._validate_section_heading_order(),
-                 self._validate_callouts(),
+                 self._validate_header(),
+                 self._validate_headings(),
+                 self._validate_boxes(),
                  self._validate_links()]
 
         return all(tests)
@@ -450,32 +502,49 @@ class MarkdownValidator(object):
 
 class IndexPageValidator(MarkdownValidator):
     """Validate the contents of the homepage (index.md)"""
-    HEADINGS = ['Topics',
+    EXPECTED_HEADINGS = ['Topics',
                 'Other Resources']
 
-    DOC_HEADERS = {'layout': vh.is_str,
-                   'title': vh.is_str}
+    EXPECTED_YAML_HEADER = {'layout': vh.is_str,
+                            'title': vh.is_str}
 
-    CALLOUTS = {'prereq': ("Prerequisites", 1, 1)}
+    EXPECTED_BOXES = {'prereq': ("Prerequisites", 1, 1)}
 
-    def _partition_links(self):
-        """Check the text of every link in index.md"""
-        check_text = self.ast.find_external_links()
-        return check_text, []
-
+    # TODO Improve the following function
     def _validate_intro_section(self):
-        """Validate the intro section
+        """Validate the intro section.
 
-        It must be a paragraph, followed by blockquoted list of prereqs"""
-        intro_block = self.ast.children[3]
-        intro_section = self.ast.is_paragraph(intro_block)
-        if not intro_section:
-            logging.error(
+        It must be a paragraph, followed by blockquoted with prereqs."""
+        if vh.is_paragraph(self.ast.body, 0):
+            logging.warning(
                 "In {0}: "
-                "Expected paragraph of introductory text at {1}".format(
-                    self.filename, intro_block.start_line))
+                "The first element must be a paragraph.".format(
+                    self.filename))
+            return False
 
-        return intro_section
+        if vh.is_blockquote(self.ast.body, 1):
+            logging.warning(
+                "In {0}: "
+                "The second element must be a blockquote.".format(
+                    self.filename))
+            return False
+        else:
+            blockquote = vh.get_node_content(self.ast.body, 1)
+            if vh.is_heading(blockquote, 0):
+                logging.warning(
+                    "In {0}: "
+                    "The first element at the blockquote must be a header.".format(
+                        self.filename))
+                return False
+
+            if vh.is_paragraph(blockquote, 1):
+                logging.warning(
+                    "In {0}: "
+                    "The second element at the blockquote must be a header.".format(
+                        self.filename))
+                return False
+
+        return True
 
     def _run_tests(self):
         parent_tests = super(IndexPageValidator, self)._run_tests()
@@ -485,124 +554,65 @@ class IndexPageValidator(MarkdownValidator):
 
 class TopicPageValidator(MarkdownValidator):
     """Validate the Markdown contents of a topic page, eg 01-topicname.md"""
-    DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str,
-                   "subtitle": vh.is_str,
-                   "minutes": vh.is_numeric}
+    EXPECTED_YAML_HEADER = {"layout": vh.is_str,
+                            "title": vh.is_str,
+                            "subtitle": vh.is_str,
+                            "minutes": vh.is_numeric}
 
-    CALLOUTS = {"objectives": ("Learning Objectives", 1, 1),
-                "callout": (None, 0, None),
-                "challenge": (None, 0, None)}
-
-    def _validate_has_no_headings(self):
-        """Check headings
-
-        The top-level document has no headings indicating subtopics.
-        The only valid subheadings are nested in blockquote elements"""
-        heading_nodes = self.ast.get_section_headings()
-        if len(heading_nodes) == 0:
-            return True
-
-        # Individual heading msgs are logged by validate_section_heading_order
-        logging.error(
-            "In {0}: "
-            "The topic page should not have sub-headings "
-            "outside of special blocks. "
-            "If a topic needs sub-headings, "
-            "it should be broken into multiple topics.".format(self.filename))
-        return False
-
-    def _run_tests(self):
-        parent_tests = super(TopicPageValidator, self)._run_tests()
-        tests = [self._validate_has_no_headings()]
-        return all(tests) and parent_tests
+    EXPECTED_BOXES = {"objectives": ("Learning Objectives", 1, 1),
+                      "callout": (None, 0, float("inf")),
+                      "challenge": (None, 0, float("inf"))}
 
 
 class MotivationPageValidator(MarkdownValidator):
     """Validate motivation.md"""
     WARN_ON_EXTRA_HEADINGS = False
 
-    DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str,
-                   "subtitle": vh.is_str}
-    # TODO: How to validate? May be a mix of reveal.js (HTML) + markdown.
+    EXPECTED_YAML_HEADER = {"layout": vh.is_str,
+                            "title": vh.is_str,
+                            "subtitle": vh.is_str}
 
 
 class ReferencePageValidator(MarkdownValidator):
     """Validate reference.md"""
-    HEADINGS = ["Glossary"]
+    EXPECTED_HEADINGS = ["Glossary"]
     WARN_ON_EXTRA_HEADINGS = False
 
-    DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str,
-                   "subtitle": vh.is_str}
+    EXPECTED_YAML_HEADER = {"layout": vh.is_str,
+                            "title": vh.is_str,
+                            "subtitle": vh.is_str}
 
-    def _partition_links(self):
-        """For reference.md, only check that text of link matches
-        dest page subtitle if the link is in a heading"""
-        all_links = self.ast.find_external_links()
-        check_text = self.ast.find_external_links(
-            parent_crit=self.ast.is_heading)
-        dont_check_text = [n for n in all_links if n not in check_text]
-        return check_text, dont_check_text
-
-    def _validate_glossary_entry(self, glossary_entry):
+    def _validate_glossary(self):
         """Validate glossary entry
 
         Glossary entry must be formatted in conformance with Pandoc's
-        ```definition_lists``` extension.
+        ```definition_lists``` extension."""
+        res = True
+        glossary_finded = False
+        glossary = None
 
-        That syntax isn't supported by the CommonMark parser, so we identify
-        terms manually."""
-        glossary_keyword = glossary_entry[0]
-        if len(glossary_entry) < 2:
+        for node in self.ast.body:
+            if glossary:
+                logging.error(
+                    "In {0}:"
+                    "Extra element after glossary.".format(
+                        self.filename))
+                res = False
+            elif glossary_finded:
+                glossary = node
+            else:
+                if (node['t'] == "Header"
+                        and vh.ast_to_string(node['c']) == "Glossary"):
+                    glossary_finded = True
+
+        if glossary is None:
             logging.error(
-                "In {0}: "
-                "Glossary entry '{1}' must have at least two lines- "
-                "a term and a definition.".format(
-                    self.filename, glossary_keyword))
-            return False
+                "In {0}:"
+                "Missing glossary entry.".format(
+                    self.filename))
+            res = False
 
-        entry_is_valid = True
-        for line_index, line in enumerate(glossary_entry):
-            if line_index == 1:
-                if not re.match("^:   ", line):
-                    logging.error(
-                        "In {0}: "
-                        "At glossary entry '{1}' "
-                        "First line of definition must "
-                        "start with ':    '.".format(
-                            self.filename, glossary_keyword))
-                    entry_is_valid = False
-            elif line_index > 1:
-                if not re.match("^    ", line):
-                    logging.error(
-                        "In {0}: "
-                        "At glossary entry '{1}' "
-                        "Subsequent lines of definition must "
-                        "start with '     '.".format(
-                            self.filename,  glossary_keyword, ))
-                    entry_is_valid = False
-        return entry_is_valid
-
-    def _validate_glossary(self):
-        """Validate the glossary section.
-
-        Assumes that the glossary is at the end of the file:
-            everything after the header. (and there must be a glossary section)
-
-        Verifies that the only things in the glossary are definition items.
-        """
-        is_glossary_valid = True
-        in_glossary = False
-        for node in self.ast.children:
-            if in_glossary:
-                is_glossary_valid = is_glossary_valid and \
-                    self._validate_glossary_entry(node.strings)
-            elif self.ast.is_heading(node) and "Glossary" in node.strings:
-                in_glossary = True
-
-        return is_glossary_valid
+        return res
 
     def _run_tests(self):
         tests = [self._validate_glossary()]
@@ -612,21 +622,12 @@ class ReferencePageValidator(MarkdownValidator):
 
 class InstructorPageValidator(MarkdownValidator):
     """Simple validator for Instructor's Guide- instructors.md"""
-    HEADINGS = ["Legend", "Overall"]
+    EXPECTED_HEADINGS = ["Legend", "Overall"]
     WARN_ON_EXTRA_HEADINGS = False
 
-    DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str,
-                   "subtitle": vh.is_str}
-
-    def _partition_links(self):
-        """For instructors.md, only check that text of link matches
-        dest page subtitle if the link is in a heading"""
-        all_links = self.ast.find_external_links()
-        check_text = self.ast.find_external_links(
-            parent_crit=self.ast.is_heading)
-        dont_check_text = [n for n in all_links if n not in check_text]
-        return check_text, dont_check_text
+    EXPECTED_YAML_HEADER = {"layout": vh.is_str,
+                            "title": vh.is_str,
+                            "subtitle": vh.is_str}
 
 
 class LicensePageValidator(MarkdownValidator):
@@ -655,9 +656,9 @@ class DiscussionPageValidator(MarkdownValidator):
     Most of the content is free-form.
     """
     WARN_ON_EXTRA_HEADINGS = False
-    DOC_HEADERS = {"layout": vh.is_str,
-                   "title": vh.is_str,
-                   "subtitle": vh.is_str}
+    EXPECTED_YAML_HEADER = {"layout": vh.is_str,
+                            "title": vh.is_str,
+                            "subtitle": vh.is_str}
 
 
 # Associate lesson template names with validators. This list used by CLI.
