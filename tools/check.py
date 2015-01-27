@@ -461,8 +461,7 @@ class ReferencePageValidator(MarkdownValidator):
         ```definition_lists``` extension.
 
         That syntax isn't supported by the CommonMark parser, so we identify
-        terms manually."""
-        glossary_keyword = glossary_entry[0]
+         terms manually."""
         if len(glossary_entry) < 2:
             logging.error(
                 "In {0}: "
