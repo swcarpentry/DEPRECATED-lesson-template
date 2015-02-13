@@ -654,6 +654,8 @@ class DiscussionPageValidator(MarkdownValidator):
     Validate the discussion page (discussion.md).
     Most of the content is free-form.
     """
+    CALLOUTS = {"callout": (None, 0, None),
+                "challenge": (None, 0, None)}
     WARN_ON_EXTRA_HEADINGS = False
     DOC_HEADERS = {"layout": vh.is_str,
                    "title": vh.is_str,
