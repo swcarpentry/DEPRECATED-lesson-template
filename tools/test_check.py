@@ -498,6 +498,21 @@ Key Word 2
 """)
         self.assertFalse(validator._validate_glossary())
 
+    def test_double_multiline_glossary_definition(self):
+        validator = self._create_validator("""## Glossary
+
+aggregation function
+:   A function that combines multiple values to produce a single new value (e.g. sum, mean, median).
+
+atomic
+:   Describes a value *not* divisible into parts that one
+    might want to work with separately. For example, if one
+    wanted to work with first and last names separately, the
+    values "Ada" and "Lovelace" would be atomic, but the value
+    "Ada Lovelace" would not.
+""")
+        self.assertTrue(validator._validate_glossary())
+
     def test_glossary(self):
         validator = self._create_validator("""## Glossary
 
