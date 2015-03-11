@@ -1,4 +1,6 @@
 #! /usr/bin/env python
+#
+# Copyright
 
 """
 Validate Software Carpentry lessons
