@@ -55,6 +55,7 @@ motivation.html : motivation.md _layouts/slides.revealjs Makefile
 	--filter=tools/filters/id4glossary.py \
 	$(INCLUDES) \
 	-o $@ $<
+	sed -i 's/^<img /<img class="img-responsive" /g' $@
 
 # Pattern to convert R Markdown to Markdown.
 %.md: %.Rmd $(R_CHUNK_OPTS)
