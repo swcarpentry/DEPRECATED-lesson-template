@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# If hidden file .commit exists, then we know that a commit just
+# happened but the post-commit hook hasn't executed yet. Use this fact
+# to regenerate HTML files, add them, and amend the last commit.
+#
+# To enable this hook, create a symlink to it in the .git/hooks
+# directory by executing the following commands from anywhere within the 
+# project file tree:
+# # Go to the .git/hooks directory.
+# $ cd "$(git rev-parse --show-toplevel)"/.git/hooks
+# # Create symlink.
+# $ ln -s -f ../../tools/maintainer_hooks/post-commit post-commit
+# # Go back to where you were.
+# $ cd -
+
+# Lesson maintainers, edit these parameters to fit your lesson.
+# e.g. for python-novice-inflammation
+# ZIP_FILE=python-novice-inflammation-data.zip
+# DATA_DIR=data
+ZIP_FILE=insert_zip_file_name_here.zip
+DATA_DIR=data
+
+if [ -f .commit ]
+    then
+    rm -f .commit
+    # If $DATA_DIR exists, then make sure the zipfile is up to date.
+    [ -d "$DATA_DIR" ] && zip --filesync --recurse-paths "$ZIP_FILE" "$DATA_DIR"
+    make preview
+    git add -u *.html
+    git add -u "$ZIP_FILE"
+    # Amend previous commit using same message
+    # Use --no-verify to bypass pre-commit hook
+    # so that we avoid getting caught in a loop
+    git commit --amend -C HEAD --no-verify
+fi
