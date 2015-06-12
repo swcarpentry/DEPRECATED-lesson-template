@@ -21,7 +21,8 @@ def main(argv):
 
     if filenames and (filenames[0] == '-o'):
         if len(filenames) < 2:
-            fail(USAGE)
+            print >> sys.stderr, USAGE
+            sys.exit(1)
         output_name = filenames[1]
         filenames = filenames[2:]
 
@@ -31,9 +32,9 @@ def main(argv):
     if filenames:
         for f in filenames:
             with open(f, 'r') as reader:
-                extract(reader, sys.stdout)
+                extract(reader, writer)
     else:
-        extract(sys.stdin, sys.stdout)
+        extract(sys.stdin, writer)
 
     if writer != sys.stdout:
         writer.close()
