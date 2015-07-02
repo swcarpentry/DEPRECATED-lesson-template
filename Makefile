@@ -52,6 +52,8 @@ preview : $(DST_ALL)
 	    --filter=tools/filters/blockquote2div.py \
 	    --filter=tools/filters/id4glossary.py \
 	    $(INCLUDES) \
+	    -Vprevious=$$(tools/nav.py $< -p) \
+	    -Vnext=$$(tools/nav.py $< -n) \
 	    -o $@ $<
 
 # Pattern to convert R Markdown to Markdown.

@@ -9,6 +9,15 @@
   <body class="lesson">
     <div class="container card">
       $banner$
+      <nav>
+        $if(previous)$
+        <a href="$previous$">&lt;&lt; Previous</a>
+        $endif$
+        <a href="index.html">Index</a>
+        $if(next)$
+        <a href="$next$">Next &gt;&gt;</a>
+        $endif$
+      </nav>
       <article>
       <div class="row">
         <div class="col-md-10 col-md-offset-1">
