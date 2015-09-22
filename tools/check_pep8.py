@@ -2,9 +2,18 @@
 """
 Convert lesson pages to Python to check for PEP8 compatibility using the `pep8`
 script. This is designed to be run from the lesson root directory.
+
+To test this script, execute
+
+    nosetests tools/check_pep8.py
+
 """
+
+from __future__ import division, print_function
 import os
 import subprocess
+import argparse
+import time
 
 
 def comment_line(line):
@@ -37,7 +46,9 @@ def md2py(fpath_md):
 
 
 def test_md2py(rm=True):
-    """Test the md2py function on known input."""
+    """
+    Test the md2py function on known input.
+    """
     fpath_md = "tools/test/test_md_to_py.md"
     fpath_py_ref = "tools/test/test_md_to_py_ref.py"
     fpath_py = "tools/test/test_md_to_py.py"
@@ -56,19 +67,51 @@ def check_page(fpath, rm=True, ignore=["E501", "W291", "E402", "E302"]):
     Convert a lesson page from Markdown to Python and check it for PEP8
     compliance.
     """
+    print("Checking", fpath, "for PEP8 compliance... ", end="")
     fpath_py = fpath.replace(".md", ".py")
     # Convert the lesson to Python
     md2py(fpath)
     # Run the pep8 script on the newly generated Python file
-    subprocess.call(["pep8", fpath_py, "--ignore", ",".join(ignore)])
+    cmd = ["pep8", fpath_py]
+    if ignore:
+        cmd += ["--ignore", ",".join(ignore)]
+    try:
+        r = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
+    except subprocess.CalledProcessError as e:
+        r = e.output.decode()
     if rm:
         os.remove(fpath_py)
+    if r:
+        print("\n" + r)
+        return False
+    else:
+        print("ok")
+        return True
 
 
 if __name__ == "__main__":
-    # test_md2py(rm=True)
-    pages = ["01-numpy.md", "02-loop.md", "03-lists.md", "04-files.md",
-             "05-cond.md", "06-func.md", "07-errors.md", "08-defensive.md",
-             "09-debugging.md", "10-cmdline.md"]
-    for page in pages:
-        check_page(page, rm=True)
+    parser = argparse.ArgumentParser(description="Run PEP8 check on files.")
+    parser.add_argument("files", nargs="+", help="Which files to test")
+    parser.add_argument("--keep-temp", default=False, action="store_true",
+                        help="Keep temporary Python files")
+    parser.add_argument("-i", "--ignore", nargs="*",
+                        default=["E501", "W291", "E402", "E302"],
+                        help='Which PEP8 errors to ignore. Defaults are \
+                             ["E501", "W291", "E402", "E302"]')
+    args = parser.parse_args()
+
+    t0 = time.time()
+    failed = []
+    for f in args.files:
+        r = check_page(f, rm=not args.keep_temp, ignore=args.ignore)
+        if not r:
+            failed.append(f)
+
+    print("\n-----------------------------------------------------------------"
+          "-----")
+    te = time.time() - t0
+    print("Checked {} files in {:.3f} s\n".format(len(args.files), te))
+    if failed:
+        print("Failed:", failed)
+    else:
+        print("OK")
