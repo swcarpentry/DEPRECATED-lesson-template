@@ -37,7 +37,7 @@ all : commands
 check: $(ALL_MD)
 	python tools/check.py .
 
-## check PEP8    : Check lessons for PEP8 compliance
+## check_pep8 : Check lessons for PEP8 compliance.
 check_pep8:
 	python tools/check_pep8.py $(SRC_MD)
 
