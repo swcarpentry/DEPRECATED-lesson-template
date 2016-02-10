@@ -84,7 +84,7 @@ class MarkdownValidator(object):
         self._callout_counts = collections.Counter()
 
     def _parse_markdown(self, markdown):
-        parser = CommonMark.Parser()
+        parser = CommonMark.DocParser()
         ast = parser.parse(markdown)
         return ast
 
