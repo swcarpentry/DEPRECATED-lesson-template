@@ -27,6 +27,11 @@ You also agree to abide by our
     or for [our other lessons][swc-lessons].
     Comments on issues and reviews of pull requests are equally welcome.
 
+5.  If making changes relating to core template files (such as page layouts or
+    includes), ensure pull requests are submitted against the
+    [lesson-template](https://github.com/swcarpentry/lesson-template) repository
+    rather than to a specific lesson.
+
 ## Other Resources
 
 1.  This lesson is based on the template found at
