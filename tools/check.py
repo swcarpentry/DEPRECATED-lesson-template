@@ -622,6 +622,8 @@ class InstructorPageValidator(MarkdownValidator):
     DOC_HEADERS = {"layout": vh.is_str,
                    "title": vh.is_str,
                    "subtitle": vh.is_str}
+    CALLOUTS = {"callout": (None, 0, None),
+                "challenge": (None, 0, None)}
 
     def _partition_links(self):
         """For instructors.md, only check that text of link matches
@@ -662,6 +664,8 @@ class DiscussionPageValidator(MarkdownValidator):
     DOC_HEADERS = {"layout": vh.is_str,
                    "title": vh.is_str,
                    "subtitle": vh.is_str}
+    CALLOUTS = {"callout": (None, 0, None),
+                "challenge": (None, 0, None)}
 
 
 # Associate lesson template names with validators. This list used by CLI.
