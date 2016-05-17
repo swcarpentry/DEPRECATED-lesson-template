@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# Create hidden file .commit to signal to the post-commit hook that it
+# should re-zip the data folder if necessary and regenerate the HTML.
+# Called by "git commit" with no arguments.
+#
+# To enable this hook, create a symlink to it in the .git/hooks
+# directory by executing the following commands from anywhere within the
+# project file tree:
+# # Go to the .git/hooks directory.
+# $ cd "$(git rev-parse --show-toplevel)"/.git/hooks
+# # Create symlink.
+# $ ln -s -f ../../tools/maintainer_hooks/pre-commit pre-commit
+# # Go back to where you were.
+# $ cd -
+
+touch .commit
