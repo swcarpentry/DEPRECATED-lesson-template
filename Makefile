@@ -37,6 +37,10 @@ all : commands
 check: $(ALL_MD)
 	python tools/check.py .
 
+## check_pep8 : Check lessons for PEP8 compliance.
+check_pep8:
+	python tools/check_pep8.py $(SRC_MD)
+
 ## clean    : Clean up temporary and intermediate files.
 clean :
 	@rm -rf $$(find . -name '*~' -print)
